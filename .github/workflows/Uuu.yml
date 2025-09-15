@@ -1,0 +1,113 @@
+name: ruyi-build-deb-ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+env:
+  DEBEMAIL: "weilinfox <caiweilin@iscas.ac.cn>"
+
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian
+            version: trixie # 13
+            repo: https://deb.debian.org/debian
+            component: "main"
+          - distro: debian
+            version: bookworm # 12
+            repo: https://deb.debian.org/debian
+            component: "main"
+          - distro: ubuntu
+            version: jammy # 22.04 LTS
+            repo: https://archive.ubuntu.com/ubuntu
+            component: "main,universe"
+          - distro: ubuntu
+            version: noble # 24.04 LTS
+            repo: https://archive.ubuntu.com/ubuntu
+            component: "main,universe"
+          - distro: ubuntu
+            version: plucky # 25.04
+            repo: https://archive.ubuntu.com/ubuntu
+            component: "main,universe"
+          - distro: deepin
+            version: beige # 23
+            repo: https://mirrors.kernel.org/deepin/beige/
+            component: "main,community"
+          - distro: deepin
+            version: crimson # 25
+            repo: https://mirrors.kernel.org/deepin/beige/
+            component: "main,community"
+            
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Sbuild
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y devscripts build-essential sbuild grep coreutils
+
+      - name: Create Sbuild Environment
+        run: |
+          # for deepin
+          [ "x${{ matrix.distro }}" = "xdeepin" ] && sudo ln -sf /usr/share/debootstrap/scripts/sid /usr/share/debootstrap/scripts/${{ matrix.version }}
+          sudo sbuild-createchroot --arch=amd64 --include=build-essential,fakeroot --components=${{ matrix.component }} ${{ matrix.version }} /srv/chroot/ ${{ matrix.repo }}
+
+      - name: Checkout Ruyi
+        uses: actions/checkout@v4
+        with:
+          repository: ruyisdk/ruyi
+          path: ruyi
+
+      - name: Checkout python-ruyi
+        uses: actions/checkout@v4
+        with:
+          repository: ruyisdk-test/python-ruyi
+          path: python-ruyi
+
+      - name: Build Package
+        run: |
+          pkg_name=python-ruyi
+          full_ver=$(grep '^version =' ruyi/pyproject.toml | cut -d '"' -f 2)
+          orig_ver=$(echo "$full_ver" | cut -d '-' -f 1)
+          deb_ver=$(echo "$full_ver" | sed 's/-//g')
+
+          # Copy debian folder
+          cp -avr python-ruyi/debian ruyi/
+          rm -rf python-ruyi
+
+          pushd ruyi
+            git config tar.tar.xz.command "xz -c -9"
+            git archive --format=tar.xz --prefix=${pkg_name}-${orig_ver}/      --output ../${pkg_name}_${orig_ver}.orig.tar.xz HEAD $(git ls-tree --name-only HEAD |grep -vF debian)
+
+            ls ../${pkg_name}_${orig_ver}.orig.tar.xz
+
+            dch -b -D ${{ matrix.version }} -v "${orig_ver}-0~${deb_ver}" "Build ${full_ver} for ${{ matrix.distro }} ${{ matrix.version }}"
+            cat debian/changelog
+            dpkg-source -b .
+          popd
+
+          # nocheck for deepin beige
+
+          if [ "x${{ matrix.version }}" = "xbeige" ]; then
+              echo "Skipping tests for deepin beige(v23)"
+              touch nocheck
+            sudo DEB_BUILD_OPTIONS=nocheck sbuild --profiles=nocheck -d ${{ matrix.version }} --arch-all --arch-any --source --force-orig-source --verbose python-ruyi*.dsc
+          else
+            sudo sbuild -d ${{ matrix.version }} --arch-all --arch-any --source --force-orig-source --verbose python-ruyi*.dsc
+          fi
+
+          
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruyi-deb-${{ matrix.distro }}-${{ matrix.version }}
+          path: |
+            *.deb
