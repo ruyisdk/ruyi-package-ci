@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      ruyi_deb_ref:
+        description: "ruyi deb build ref"
+        type: string
+        required: false
+        default: main
   schedule:
     - cron: "0 2 * * *"
 
@@ -63,6 +69,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ruyisdk/ruyi
+          ref: ${{ github.event.inputs.ruyi_deb_ref }}
           path: ruyi
 
       - name: Checkout python-ruyi
