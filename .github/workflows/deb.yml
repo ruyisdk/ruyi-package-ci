@@ -10,8 +10,6 @@ on:
         type: string
         required: false
         default: main
-  schedule:
-    - cron: "0 2 * * *"
 
 env:
   DEBEMAIL: "weilinfox <caiweilin@iscas.ac.cn>"
